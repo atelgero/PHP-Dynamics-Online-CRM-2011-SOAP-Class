@@ -13,7 +13,7 @@ You need to pass four parameters to the class:
 - The debug level [optional]
 
 ```php
-$dynamicsClient = new dynamicsClient('email','password','orgname.crm4.dynamics.com',1);
+$dynamicsClient = new dynamicsClient('email','password','orgname.api.dynamics.com',1);
 ```
 
 If the debug mode is set to 1 then all requests and reponse data will be printed.
