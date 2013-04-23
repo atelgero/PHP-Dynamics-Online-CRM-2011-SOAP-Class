@@ -14,6 +14,14 @@
 *	@param intval $debugl 		0 = Off, 1 = On
 *
 *	@author Ben Speakman <ben@cyber-duck.co.uk>
+*	@modified by: Matt Barnes <matt@directdynamics.ca>
+*	
+*	Change Log:
+*	-request type is no longer hardcoded in the request header
+*	-server time is dynamically loaded, so time zone and dst changes no longer cause errors
+*	-various minor changes to reflect new authentication protocols
+*	-dynamicsRegion url is hardcoded for now, and must be updated to reflect the correct region.  The old region url's are no longer valid.
+*	
 */
 class dynamicsClient
 {
@@ -34,12 +42,12 @@ class dynamicsClient
 		
 		$this->orgPoint    = "/XRMServices/2011/Organization.svc";
 		$this->dynamicsUrl = $dynamicsUrl;
-		$this->debug       = $debug;
+		$this->debug       =  $debug;
 
 		// Strip the url to get the datacenter location
 		// crm = United States, crm4 = Europe and crm5 = Asia
-		$dynamicsRegionArray = explode(".",$dynamicsUrl);
-		$this->dynamicsRegion = $dynamicsRegionArray[1];
+		//$dynamicsRegionArray = explode(".",$dynamicsUrl);
+		$this->dynamicsRegion = 'crmna'; //$dynamicsRegionArray[1];
 
 		$this->email    = $email;
 		$this->password = $password;
@@ -51,8 +59,8 @@ class dynamicsClient
 		$this->_lastResponse  = '';
 		$this->_error         = '';
 
-		$this->currentTime = substr(date('c'),0,-6) . ".00";
-		$this->nextDayTime = substr(date('c', strtotime('+1 day')),0,-6) . ".00"; 
+		$this->currentTime = '';
+		$this->nextDayTime = '';
 
 		$this->login();
 
@@ -67,6 +75,12 @@ class dynamicsClient
 
 		// Register device
 		$register = $this->registerDevice();
+		$devicedom = new DomDocument();
+		$devicedom->loadXML($register);
+
+		//Dynamically retrieve the server time to be used in all requests
+		$this->currentTime = $devicedom->getElementsbyTagName("ServerInfo")->item(0)->getAttribute("ServerTime");
+		$this->nextDayTime = substr(date("c", strtotime($this->currentTime.' +1 day')), 0, -6).'Z';		
 
 		// Get binary DA token
 		$response = $this->getBinaryDAToken($this->messageid,$this->deviceUserName,$this->devicePassword);
@@ -92,34 +106,29 @@ class dynamicsClient
 				$this->_error = "Failed to get security tokens.";
 
 			} else {
-				
 				return true;
 
 			}
 
 		} else {
-			
 			$this->_error = "Failed to get binary DA token.";
 
 		}
 
 	}
 
-	/**
+	 /**
 	 * Makes the SOAP call
 	 * 
 	 * @param  string $request    Soap method
+	 * @param  string $action     The type of action to be performed valid values: 'Create' 'Retrieve' 'RetrieveMultiple'
 	 * 
 	 * @return result
 	 */
-	public function sendQuery($request){
+	private function sendQuery($request, $action){
 
-		$xml = '
-		<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
-			'.$this->getHeader().'
-			<s:Body>
-				'.$request.'
-			</s:Body>
+		$xml = '<?xml version="1.0" encoding="utf-8" ?'. '>
+		<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">'.$this->getHeader($action).'<s:Body>'.$request.'</s:Body>
 		</s:Envelope>';	
 
 		return $this->doCurl($this->orgPoint, $this->dynamicsUrl, "https://".$this->dynamicsUrl.$this->orgPoint, $xml);
@@ -131,7 +140,7 @@ class dynamicsClient
 	 * 
 	 * @return soap header
 	 */
-	private function getHeader() {
+	private function getHeader($action) {
 
 		// If we dont have any of the security tokens try to log in
 		if (empty($this->keyIdentifier) || empty($this->securityToken0) || empty($this->securityToken1)){
@@ -140,19 +149,15 @@ class dynamicsClient
 
 		$header = '
 		<s:Header>
-			<a:Action s:mustUnderstand="1">http://schemas.microsoft.com/xrm/2011/Contracts/Services/IOrganizationService/RetrieveMultiple</a:Action>
-			<a:MessageID>
-				urn:uuid:'.$this->messageid.'
-			</a:MessageID>
-			<a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo>
-			<VsDebuggerCausalityData xmlns="http://schemas.microsoft.com/vstudio/diagnostics/servicemodelsink">uIDPozJEz+P/wJdOhoN2XNauvYcAAAAAK0Y6fOjvMEqbgs9ivCmFPaZlxcAnCJ1GiX+Rpi09nSYACQAA</VsDebuggerCausalityData>
-			<a:To s:mustUnderstand="1">
-				https://'.$this->dynamicsUrl.'/XRMServices/2011/Organization.svc
-			</a:To>
+			<a:Action s:mustUnderstand="1">http://schemas.microsoft.com/xrm/2011/Contracts/Services/IOrganizationService/'.$action.'</a:Action>
+			<a:MessageID>urn:uuid:'.$this->messageid.'</a:MessageID>
+			<a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo>'
+//			<VsDebuggerCausalityData xmlns="http://schemas.microsoft.com/vstudio/diagnostics/servicemodelsink">uIDPozJEz+P/wJdOhoN2XNauvYcAAAAAK0Y6fOjvMEqbgs9ivCmFPaZlxcAnCJ1GiX+Rpi09nSYACQAA</VsDebuggerCausalityData>
+			.'<a:To s:mustUnderstand="1">https://'.$this->dynamicsUrl.'/XRMServices/2011/Organization.svc</a:To>
 			<o:Security s:mustUnderstand="1" xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
 			<u:Timestamp u:Id="_0">
-				<u:Created>'.$this->currentTime.'Z</u:Created>
-				<u:Expires>'.$this->nextDayTime.'Z</u:Expires>
+				<u:Created>'.$this->currentTime.'</u:Created>
+				<u:Expires>'.$this->nextDayTime.'</u:Expires>
 			</u:Timestamp>
 			<EncryptedData Id="Assertion0" Type="http://www.w3.org/2001/04/xmlenc#Element" xmlns="http://www.w3.org/2001/04/xmlenc#">
 				<EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#tripledes-cbc"></EncryptionMethod>
@@ -161,22 +166,16 @@ class dynamicsClient
 						<EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"></EncryptionMethod>
 						<ds:KeyInfo Id="keyinfo">
 							<wsse:SecurityTokenReference xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
-								<wsse:KeyIdentifier EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary" ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509SubjectKeyIdentifier">
-									'.$this->keyIdentifier.'
-								</wsse:KeyIdentifier>
+								<wsse:KeyIdentifier EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary" ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509SubjectKeyIdentifier">'.$this->keyIdentifier.'</wsse:KeyIdentifier>
 							</wsse:SecurityTokenReference>
 						</ds:KeyInfo>
 						<CipherData>
-							<CipherValue>
-								'.$this->securityToken0.'
-							</CipherValue>
+							<CipherValue>'.$this->securityToken0.'</CipherValue>
 						</CipherData>
 					</EncryptedKey>
 				</ds:KeyInfo>
 				<CipherData>
-					<CipherValue>
-						'.$this->securityToken1.'
-					</CipherValue>
+					<CipherValue>'.$this->securityToken1.'</CipherValue>
 				</CipherData>
 			</EncryptedData>
 			</o:Security>
@@ -193,35 +192,29 @@ class dynamicsClient
 	 */
 	private function getSecurityTokens($cipherValue){
 
-		$securityTokenSoapTemplate = '
+		$securityTokenSoapTemplate = '<?xml version="1.0" encoding="utf-8" ?'. '>
 		<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
 			<s:Header>
 				<a:Action s:mustUnderstand="1">http://schemas.xmlsoap.org/ws/2005/02/trust/RST/Issue</a:Action>
-				<a:MessageID>
-					urn:uuid:'.$this->messageid.'
-				</a:MessageID>
-				<a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo>
-				<VsDebuggerCausalityData xmlns="http://schemas.microsoft.com/vstudio/diagnostics/servicemodelsink">uIDPozBEz+P/wJdOhoN2XNauvYcAAAAAK0Y6fOjvMEqbgs9ivCmFPaZlxcAnCJ1GiX+Rpi09nSYACQAA</VsDebuggerCausalityData>
-				<a:To s:mustUnderstand="1">https://login.live.com/liveidSTS.srf</a:To>
+				<a:MessageID>urn:uuid:'.$this->messageid.'</a:MessageID>
+				<a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo>'
+//				<VsDebuggerCausalityData xmlns="http://schemas.microsoft.com/vstudio/diagnostics/servicemodelsink">uIDPozBEz+P/wJdOhoN2XNauvYcAAAAAK0Y6fOjvMEqbgs9ivCmFPaZlxcAnCJ1GiX+Rpi09nSYACQAA</VsDebuggerCausalityData>
+				.'<a:To s:mustUnderstand="1">https://login.live.com/extSTS.srf</a:To>
 				<o:Security s:mustUnderstand="1" xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
 					<u:Timestamp u:Id="_0">
-						<u:Created>'.$this->currentTime.'Z</u:Created>
-						<u:Expires>'.$this->nextDayTime.'Z</u:Expires>
+						<u:Created>'.$this->currentTime.'</u:Created>
+						<u:Expires>'.$this->nextDayTime.'</u:Expires>
 					</u:Timestamp>
 					<o:UsernameToken u:Id="user">
 						<o:Username>'.$this->email.'</o:Username>
-						<o:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">
-							'.$this->password.'
-						</o:Password>
+						<o:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">'.$this->password.'</o:Password>
 					</o:UsernameToken>
 					<wsse:BinarySecurityToken ValueType="urn:liveid:device" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
 						<EncryptedData Id="BinaryDAToken0" Type="http://www.w3.org/2001/04/xmlenc#Element" xmlns="http://www.w3.org/2001/04/xmlenc#">
 							<EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#tripledes-cbc"></EncryptionMethod>
 							<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:KeyName>http://Passport.NET/STS</ds:KeyName></ds:KeyInfo>
 							<CipherData>
-								<CipherValue>
-									'.$this->cipherValue.'
-								</CipherValue>
+								<CipherValue>'.$this->cipherValue.'</CipherValue>
 							</CipherData>
 						</EncryptedData>
 					</wsse:BinarySecurityToken>
@@ -239,7 +232,7 @@ class dynamicsClient
 			</s:Envelope>
 		';
 
-		return $this->doCurl("/liveidSTS.srf", "login.live.com", "https://login.live.com/liveidSTS.srf", $securityTokenSoapTemplate);
+		return $this->doCurl("/extSTS.srf", "login.live.com", "https://login.live.com/extSTS.srf", $securityTokenSoapTemplate);
 	}
 
 	/**
@@ -249,26 +242,22 @@ class dynamicsClient
 	 */
 	private function getBinaryDAToken(){
 		
-		$deviceCredentialsSoapTemplate = '
+		$deviceCredentialsSoapTemplate = '<?xml version="1.0" encoding="utf-8" ?'. '>
 		<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
 			<s:Header>
 				<a:Action s:mustUnderstand="1">http://schemas.xmlsoap.org/ws/2005/02/trust/RST/Issue</a:Action>
-				<a:MessageID>
-					urn:uuid:'.$this->messageid.'
-				</a:MessageID>
-				<a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo>
-				<VsDebuggerCausalityData xmlns="http://schemas.microsoft.com/vstudio/diagnostics/servicemodelsink">uIDPoy9Ez+P/wJdOhoN2XNauvYcAAAAAK0Y6fOjvMEqbgs9ivCmFPaZlxcAnCJ1GiX+Rpi09nSYACQAA</VsDebuggerCausalityData>
-				<a:To s:mustUnderstand="1">https://login.live.com/liveidSTS.srf</a:To>
+				<a:MessageID>urn:uuid:'.$this->messageid.'</a:MessageID>
+				<a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo>'
+//				<VsDebuggerCausalityData xmlns="http://schemas.microsoft.com/vstudio/diagnostics/servicemodelsink">uIDPoy9Ez+P/wJdOhoN2XNauvYcAAAAAK0Y6fOjvMEqbgs9ivCmFPaZlxcAnCJ1GiX+Rpi09nSYACQAA</VsDebuggerCausalityData>
+				.'<a:To s:mustUnderstand="1">https://login.live.com/extSTS.srf</a:To>
 				<o:Security s:mustUnderstand="1" xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
 					<u:Timestamp u:Id="_0">
-						<u:Created>'.$this->currentTime.'Z</u:Created>
-						<u:Expires>'.$this->nextDayTime.'Z</u:Expires>
+						<u:Created>'.$this->currentTime.'</u:Created>
+						<u:Expires>'.$this->nextDayTime.'</u:Expires>
 					</u:Timestamp>
 					<o:UsernameToken u:Id="devicesoftware">
 						<o:Username>'.$this->deviceUserName.'</o:Username>
-						<o:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">
-							'.$this->devicePassword.'
-						</o:Password>
+						<o:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">'.$this->devicePassword.'</o:Password>
 					</o:UsernameToken>
 				</o:Security>
 			</s:Header>
@@ -284,7 +273,7 @@ class dynamicsClient
 			</s:Body>
 		</s:Envelope>';
 
-		return $this->doCurl("/liveidSTS.srf" , "login.live.com" , "https://login.live.com/liveidSTS.srf", $deviceCredentialsSoapTemplate);
+		return $this->doCurl("/extSTS.srf" , "login.live.com" , "https://login.live.com/extSTS.srf", $deviceCredentialsSoapTemplate);
 
 	}
 
@@ -373,7 +362,7 @@ class dynamicsClient
 	 * @return result
 	 */
 	private function doCurl($postUrl, $hostname, $soapUrl, $content){
-		
+
 		$headers = array(
 				"POST ". $postUrl ." HTTP/1.1",
 				"Host: " . $hostname,
@@ -395,6 +384,7 @@ class dynamicsClient
 		curl_setopt($cURL, CURLOPT_HTTPHEADER, $headers);
 		curl_setopt($cURL, CURLOPT_POST, 1);
 		curl_setopt($cURL, CURLOPT_POSTFIELDS, $content);
+		curl_setopt($cURLHandle, CURLOPT_SSLVERSION , 3);
 
 		$response = curl_exec($cURL);
 		curl_close($cURL);
@@ -405,3 +395,4 @@ class dynamicsClient
 		return $response;
 	}    
 }
+?>

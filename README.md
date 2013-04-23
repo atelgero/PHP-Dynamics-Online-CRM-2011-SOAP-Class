@@ -1,6 +1,7 @@
 # PHP Dynamics Online CRM 2011 SOAP Class
 
 This class is to enable you to connect to Microsoft Dynamics 2011 online cloud hosted CRM service with PHP via SOAP.
+Updated for compatibility with the latest changes from Microsoft.  Works with online orgs still using LiveID authentication.  Does not work with Office365 authentication.
 
 ## Usage
 
@@ -17,4 +18,5 @@ $dynamicsClient = new dynamicsClient('email','password','orgname.crm4.dynamics.c
 
 If the debug mode is set to 1 then all requests and reponse data will be printed.
 
-**Please note I have been told Microsoft might have updated their authentication method.**
+Originally created by Ben Speakman
+Modified by Matt Barnes
